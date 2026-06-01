@@ -221,9 +221,15 @@ class SyncNet_color(nn.Module):
         return audio_embedding, face_embedding
 
 logloss = nn.BCELoss()
+logloss_amp = nn.BCEWithLogitsLoss()
+use_amp = True
+
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
-    loss = logloss(d.unsqueeze(1), y)
+    if use_amp:
+        loss = logloss_amp(d.unsqueeze(1), y)
+    else:
+        loss = logloss(d.unsqueeze(1), y)
 
     return loss
     
@@ -231,24 +237,30 @@ def train(save_dir, dataset_dir, mode):
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
         
+    torch.backends.cudnn.benchmark = True
+
     train_dataset = Dataset(dataset_dir, mode=mode)
     train_data_loader = DataLoader(
-        train_dataset, batch_size=16, shuffle=True,
-        num_workers=16)
+        train_dataset, batch_size=128, shuffle=True,
+        num_workers=2, pin_memory=True, persistent_workers=True)
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
+    scaler = torch.amp.GradScaler('cuda')
     best_loss = 1000000
     for epoch in range(100):
         for batch in train_data_loader:
             imgT, audioT, y = batch
-            imgT = imgT.cuda()
-            audioT = audioT.cuda()
-            y = y.cuda()
-            audio_embedding, face_embedding = model(imgT, audioT)
+            imgT = imgT.cuda(non_blocking=True)
+            audioT = audioT.cuda(non_blocking=True)
+            y = y.cuda(non_blocking=True)
+            optimizer.zero_grad(set_to_none=True)
+            with torch.amp.autocast('cuda'):
+                audio_embedding, face_embedding = model(imgT, audioT)
             loss = cosine_loss(audio_embedding, face_embedding, y)
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
         print(epoch+1, loss.item())
         if loss.item() < best_loss:
             best_loss = loss.item()

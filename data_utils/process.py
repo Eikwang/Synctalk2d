@@ -13,7 +13,7 @@ def extract_audio(path, out_path, sample_rate=16000):
 def extract_images(path):
     
     
-    full_body_dir = path.replace(path.split("/")[-1], "full_body_img")
+    full_body_dir = os.path.join(os.path.dirname(path), "full_body_img")
     if not os.path.exists(full_body_dir):
         os.mkdir(full_body_dir)
     
@@ -21,7 +21,6 @@ def extract_images(path):
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps != 25:
-        # High quality conversion to 25fps using ffmpeg
         cmd = f'ffmpeg -i {path} -vf "fps=25" -c:v libx264 -c:a aac {path.replace(".mp4", "_25fps.mp4")}'
         os.system(cmd)
         path = path.replace(".mp4", "_25fps.mp4")
@@ -36,7 +35,7 @@ def extract_images(path):
         ret, frame = cap.read()
         if not ret:
             break
-        cv2.imwrite(full_body_dir+"/"+str(counter)+'.jpg', frame)
+        cv2.imwrite(os.path.join(full_body_dir, str(counter)+'.jpg'), frame)
         counter += 1
         
 def get_audio_feature(wav_path):
@@ -46,7 +45,7 @@ def get_audio_feature(wav_path):
     
 def get_landmark(path, landmarks_dir):
     print("detecting landmarks...")
-    full_img_dir = path.replace(path.split("/")[-1], "full_body_img")
+    full_img_dir = os.path.join(os.path.dirname(path), "full_body_img")
     
     from get_landmark import Landmark
     landmark = Landmark()

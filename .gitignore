@@ -1,0 +1,14 @@
+__pycache__/
+.understand-anything/
+checkpoint/
+date_utils/__pycache__/
+dataset/
+demo/
+docs/
+model/
+runtime/
+runtime1/
+syncnet_ckpt/
+*.onnx
+*.mp4
+specs/

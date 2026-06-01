@@ -22,7 +22,7 @@ def get_args():
     parser.add_argument('--save_dir', type=str, help="trained model save path.")
     parser.add_argument('--see_res', action='store_true')
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batchsize', type=int, default=8)
+    parser.add_argument('--batchsize', type=int, default=24)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
 
@@ -57,20 +57,28 @@ class PerceptualLoss():
         return loss
 
 logloss = nn.BCELoss()
+logloss_amp = nn.BCEWithLogitsLoss()
+use_amp = True
+
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
-    loss = logloss(d.unsqueeze(1), y)
+    if use_amp:
+        loss = logloss_amp(d.unsqueeze(1), y)
+    else:
+        loss = logloss(d.unsqueeze(1), y)
 
     return loss
 
 def train(net, epoch, batch_size, lr):
+    torch.backends.cudnn.benchmark = True
+
     content_loss = PerceptualLoss(torch.nn.MSELoss())
     if use_syncnet:
         if args.syncnet_checkpoint == "":
             raise ValueError("Using syncnet, you need to set 'syncnet_checkpoint'.Please check README")
             
         syncnet = SyncNet_color(args.asr).eval().cuda()
-        syncnet.load_state_dict(torch.load(args.syncnet_checkpoint))
+        syncnet.load_state_dict(torch.load(args.syncnet_checkpoint, weights_only=False))
     save_dir= args.save_dir
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -79,12 +87,13 @@ def train(net, epoch, batch_size, lr):
     dataset_dir_list = [args.dataset_dir]
     for dataset_dir in dataset_dir_list:
         dataset = MyDataset(dataset_dir, args.asr)
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=32)
+        train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=2, pin_memory=True, persistent_workers=True)
         dataloader_list.append(train_dataloader)
         dataset_list.append(dataset)
     
     optimizer = optim.Adam(net.parameters(), lr=lr)
     criterion = nn.L1Loss()
+    scaler = torch.amp.GradScaler('cuda')
     
     for e in range(epoch):
         net.train()
@@ -95,24 +104,26 @@ def train(net, epoch, batch_size, lr):
         with tqdm(total=len(dataset), desc=f'Epoch {e + 1}/{epoch}', unit='img') as p:
             for batch in train_dataloader:
                 imgs, labels, audio_feat = batch
-                imgs = imgs.cuda()
-                labels = labels.cuda()
-                audio_feat = audio_feat.cuda()
-                preds = net(imgs, audio_feat)
-                if use_syncnet:
-                    y = torch.ones([preds.shape[0],1]).float().cuda()
-                    a, v = syncnet(preds, audio_feat)
-                    sync_loss = cosine_loss(a, v, y)
-                loss_PerceptualLoss = content_loss.get_loss(preds, labels)
-                loss_pixel = criterion(preds, labels)
-                if use_syncnet:
-                    loss = loss_pixel + loss_PerceptualLoss*0.01 + 10*sync_loss
-                else:
-                    loss = loss_pixel + loss_PerceptualLoss*0.01
-                p.set_postfix(**{'loss (batch)': loss.item()})
+                imgs = imgs.cuda(non_blocking=True)
+                labels = labels.cuda(non_blocking=True)
+                audio_feat = audio_feat.cuda(non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
+                with torch.amp.autocast('cuda'):
+                    preds = net(imgs, audio_feat)
+                    if use_syncnet:
+                        y = torch.ones([preds.shape[0],1]).float().cuda()
+                        a, v = syncnet(preds, audio_feat)
+                        sync_loss = cosine_loss(a, v, y)
+                    loss_PerceptualLoss = content_loss.get_loss(preds, labels)
+                    loss_pixel = criterion(preds, labels)
+                    if use_syncnet:
+                        loss = loss_pixel + loss_PerceptualLoss*0.01 + 10*sync_loss
+                    else:
+                        loss = loss_pixel + loss_PerceptualLoss*0.01
+                p.set_postfix(**{'loss (batch)': loss.item()})
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 p.update(imgs.shape[0])
                 
         if (e+1) % 5 == 0:
