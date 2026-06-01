@@ -34,7 +34,7 @@ conda activate synctalk_2d
 
 2. 安装深度学习框架（PyTorch 配套 CUDA 12.1）
 ```bash
-conda install pytorch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 pytorch-cuda=12.1 -c pytorch -c nvidia
+conda install pytorch==2.4.0 torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 ```
 
 3. 安装视频处理依赖（FFmpeg 为必备组件）
@@ -45,7 +45,6 @@ conda install -c conda-forge ffmpeg
 4. 安装 Python 第三方库
 ```bash
 pip install opencv-python transformers soundfile librosa onnxruntime-gpu configargparse
-pip install numpy==1.23.5
 ```
 
 ## 三、训练数据集制作规范
