@@ -246,7 +246,7 @@ def train(save_dir, dataset_dir, mode):
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
-    scaler = torch.amp.GradScaler('cuda')
+    scaler = torch.cuda.amp.GradScaler()
     best_loss = 1000000
     for epoch in range(100):
         for batch in train_data_loader:
